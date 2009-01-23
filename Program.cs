@@ -257,8 +257,8 @@ namespace SvnBackup {
         }
 
         public override void DisplayUsage() {
-            ConsoleEx.WriteLine("SVN Backup 1.00 for .NET");
-            ConsoleEx.WriteLine("http://www.sourceforge.net/projects/ConsoleFx");
+            ConsoleEx.WriteLine("SVN Backup for .NET");
+            ConsoleEx.WriteLine("http://codeplex.com/svnbackup");
             ConsoleEx.WriteLine("Copyright (c) 2009 Vijay Santhanam");
             ConsoleEx.WriteLine();
             ConsoleEx.WriteLine("Backs up (or 'dumps') an SVN repository to a file using svnadmin");
