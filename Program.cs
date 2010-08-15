@@ -8,8 +8,11 @@ using ConsoleFx;
 using ICSharpCode.SharpZipLib.Zip;
 
 namespace SvnBackup {
-    // svnbackup <svn path> <repository path> <dump file> [-f] [-z]
-    // dump file == "what-ever-format-you-please{name}{stamp}.zip"
+
+    /// <summary>
+    /// svnbackup <svn path> <repository path> <dump file> [-f] [-z] 
+    /// dump file == "what-ever-format-you-please{name}{stamp}.zip" 
+    /// </summary>
     [CommandLine()]
     [ParameterUsage(ProgramMode.Normal, MinOccurences = 3, MaxOccurences = 5)]
     [ParameterUsage(ProgramMode.Help, MinOccurences = 0, MaxOccurences = 0)]
@@ -20,8 +23,6 @@ namespace SvnBackup {
             get; set;
         }
 
-
-        
         [ParameterProperty(ProgramMode.Normal, 1)]
         public string RepoPath {
             get;
@@ -39,7 +40,6 @@ namespace SvnBackup {
             set;
         }
         
-
         public bool DumpFileIsFormatString {
             get;
             set;
@@ -78,6 +78,11 @@ namespace SvnBackup {
             return fn;
         }
 
+        string GetSvnAdminDumpBatchFileName()
+        {
+            return String.Format("{0}_{1}.bat", GetRepoName(), Guid.NewGuid().ToString());
+        }
+
         string GetSvnAdminDumpFileName()
         {
             return ZipFile? 
@@ -103,8 +108,15 @@ namespace SvnBackup {
             return new DirectoryInfo(RepoPath).Name;
         }
 
+        
+
         void Validate()
         {
+            // TODO: various validation checks
+            // check the svn path exists with svnadmin.exe
+            // check the repo path exists
+            // run svnadmin verify to ensure the repo is sound
+            // 
             List<string> msgs = new List<string>();
 
             if (!Directory.Exists(RepoPath))
@@ -122,53 +134,57 @@ namespace SvnBackup {
             using (var process = new Process())
             {
 
+                ConsoleEx.WriteLine("{0} repository commencing dump to {1}", GetRepoName(), dumpFileName);
+
                 Func<string, string> quote = (inputStr) => "\"" + inputStr + "\"";
 
-                string[] args = {
+                var batchFileName = GetSvnAdminDumpBatchFileName();
+
+                using (var batchFile = File.CreateText(batchFileName))
+                {
+
+                    string[] args = {
                                     "dump",
-                                    quote(RepoPath)
+                                    quote(RepoPath),
+                                    ">",
+                                    quote(dumpFileName)
                                 };
 
-                
 
-                var startInfo = new ProcessStartInfo(
-                    Path.Combine(SvnPath, "svnadmin"), 
-                    String.Join(" ", args)) 
-                {
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false
+                    List<string> parts = new List<string>();
+                    parts.Add(quote(Path.Combine(SvnPath, "svnadmin")));
+                    parts.AddRange(args);
 
-                };
-                process.StartInfo = startInfo;
-               
+                    var batchFileContents = String.Join(" ",parts.ToArray());
+
+                    batchFile.WriteLine(batchFileContents);
+                }
+
+
+                process.StartInfo.CreateNoWindow = true;
+                process.StartInfo.Arguments = "";
+                process.StartInfo.FileName = batchFileName;
+                process.StartInfo.UseShellExecute = false;
                 process.Start();
+                process.WaitForExit();
 
-                string svnAdminDumpResponse = "";
+                long totalReadBytes = new FileInfo(dumpFileName).Length;
 
-                // var dumped = os.ReadToEnd();
-                StreamReader reader = process.StandardOutput;
-
-                char[] dumpOutputBuffer = new char[4096];
-                List<char> dumpOutput = new List<char>(100000);
-                int readChars = 0;
-
-                while (!reader.EndOfStream)
-                {
-                    readChars = reader.Read(dumpOutputBuffer, 0, dumpOutputBuffer.Length);
-                    dumpOutput.AddRange(dumpOutputBuffer.Take(readChars));
-                }
-
-
-                using (StreamWriter writer = new StreamWriter(dumpFileName,false))
-                {
-                    writer.Write(dumpOutput.ToArray());
-                }
-
-                ConsoleEx.WriteLine("{0} repository dumped to {1}", GetRepoName(),dumpFileName);
+                ConsoleEx.WriteLine("{0} repository successfully dumped to {1} with size of {2} bytes", GetRepoName(), dumpFileName, totalReadBytes);
                 
+
+                // delete the batch file
+                try
+                {
+                    File.Delete(batchFileName);
+                }
+                catch (Exception ex)
+                {
+                    ConsoleEx.WriteLine("Warning! Could not delete batch file {0} - Exception message {1}", batchFileName,ex.Message);
+                }
             }
+
+
             if (!File.Exists(dumpFileName))
             {
                 throw new Exception("The dumpings of svnadmin doesn't exist. svnadmin failed in it's duty");
@@ -176,14 +192,18 @@ namespace SvnBackup {
 
             if (ZipFile)
             {
+
+                
+
                 // zip up dump file
                 string zipFileName = GetZipFileName();
+
+                ConsoleEx.WriteLine("{0} repository commencing zipping to {1}", GetRepoName(), zipFileName);
 
                 // Depending on the directory this could be very large and would require more attention
                 // in a commercial package.
 
-                string[] filenames = //Directory.GetFiles(args[0]);
-                    {dumpFileName};
+                string[] filenames = {dumpFileName};
 
                 // 'using' statements gaurantee the stream is closed properly which is a big source
                 // of problems otherwise.  Its exception safe as well which is great.
@@ -220,7 +240,7 @@ namespace SvnBackup {
                         }
                     }
 
-                    // Finish/Close arent needed strictly as the using statement does this automatically
+                    // NOTE by Vijay: Finish/Close arent needed strictly as the using() disposal will call these automagically
 
                     // Finish is important to ensure trailing information for a Zip file is appended.  Without this
                     // the created file would be invalid.
@@ -229,14 +249,12 @@ namespace SvnBackup {
                     // Close is important to wrap things up and unlock the file.
                     s.Close();
 
-                    ConsoleEx.WriteLine("{0} repository dumped and zipped to {1}", GetRepoName(), zipFileName);
+                    ConsoleEx.WriteLine("{0} repository successfully zipped to {1}", GetRepoName(), zipFileName);
                 }
 
             }
 
         }
-
-        
 
 
         public override int ExecuteNormal(string[] parameters) {
@@ -244,7 +262,6 @@ namespace SvnBackup {
             try
             {
                 // validate
-
                 Backup();
                 return 0;
 
@@ -265,7 +282,7 @@ namespace SvnBackup {
             ConsoleEx.WriteLine();
             ConsoleEx.WriteLine("svnbackup <svn path> <repository path> <dump file> [-f] [-z]");
             ConsoleEx.WriteLine(); ;
-            ConsoleEx.WriteLine("  -f     interpret dump file specified as formatted utilizing symbols stamp and/or name. Default: false");
+            ConsoleEx.WriteLine("  -f     interpret dump file specified as formatted utilizing symbols {stamp} and/or {name}. Default: false");
             ConsoleEx.WriteLine("  -z     enables zipping of the dump file. Default: false");
             ConsoleEx.WriteLine();
             base.DisplayUsage();
